@@ -1,0 +1,108 @@
+---
+title: "Practical Machine Learning - final project"
+author: "Muzi Zim"
+date: "15/11/2019"
+output: html_document
+---
+# Question
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+# Solution
+
+First, all the elements required to adequately setup the solution will be executed, comprising the following:
+1. Installation of libraries that will be used
+2. Setting the working directory to the folder that will contain the solution
+3. Reading in the training and testing datasets (these were downloaded and saved in the working directory)
+4. Setting the seed for reproduceability
+
+```{r}
+# Install libraries that will be used in the analysis
+library(caret)
+library(e1071)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(kernlab)
+library(anchors)
+
+# Set the working directory to the location where the training and testing data sets have been stored
+setwd("~/Documents/Data Science/Practical Machine Learning")
+training <- read.csv("training.csv", sep = ";", header = TRUE)
+testing <- read.csv("testing.csv", sep = ";", header = TRUE)
+
+# Set seed for reproduceability
+set.seed(12345)
+```
+
+Next, the data and the solution algorithms will be explored.
+```{r}
+# Explore the training dataset - set the list length to the number of columns to avoid having the output truncated
+str(training, list.len = ncol(training))
+```
+
+We can see the following from the output of the *str* function:
+1. Many of the columns with numeric variables have no values in them ("NA")
+2. Some of the entries in some of the factor variables have blank ("") values
+3. Some of the entries in some of the factor variables have "#DIV/0!" values
+
+To make the transformations easier, the datasets will be re-read, converting blank ("") and "#DIV/0!" values to "NA" values.
+
+```{r}
+training <- read.csv("training.csv", sep = ";", header = TRUE, na.strings = c("NA", "#DIV/0!",""))
+testing <- read.csv("testing.csv", sep = ";", header = TRUE, na.strings = c("NA", "#DIV/0!",""))
+```
+
+A document with the definitions of all the variables could not be found on the source website (*http://groupware.les.inf.puc-rio.br/har*) to see if some of the variables could be removed. An example of one such variable is the first variable (*user_name*), a factor with six levels that seems to match the name of the person who performed the exercise for the data collection. This variable could skew the results and undermine the model's performance at scale, given that it would then use the name of the user to predict the class of exercise that was being done (e.g. if user *"carlitos"* performed classe A more frequently than any other class, the model would predict that if another user *"carlitos"* performed exercises, they would be skewed towards performing classe A). In the case of users with different names however, the model would not use this as an input, given that it would not have been trained on the specific factor (this would not be the case for ordinal and scale variables).
+
+Given that this is just a hypothesis that cannot be tested without the definition documentation, none of the variables will be removed. In a real-world application however, someone with the requisite domain expertise would be consulted to give guidance on this matter.
+
+Variables with all missing values will however be removed from the training and testing sets.
+
+```{r}
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+```
+
+The next step in the analysis will be to sub-partition the training set into a subTraining and a subTesting set. The subTraining set will be used to train four models, which will then be compared to each other for accuracy on the subTesting set. For cross-validation, the training set will be partitioned using k-fold partitioning. Once the partitioning is done, the models will be trained on the subTraining set.
+
+```{r}
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+subTraining <- training[inTrain, ]
+subTesting <- training[-inTrain, ]
+
+model_rf <- train(classe ~ ., data = subTraining, method = "rf")
+model_boost <- train(classe ~ ., data = subTraining, method = "gbm", verbose = FALSE)
+model_tree <- rpart(classe ~ ., data = subTraining, method = "class")
+model_svm <- train(classe ~ ., data = subTraining, method = "svmLinear")
+```
+
+Once all the models have been trained, they will predict on the testing set to measure their respective accuracies.
+
+```{r}
+pred_rf <- predict(model_rf, newdata = subTesting)
+pred_boost <- predict(model_boost, newdata = subTesting)
+pred_tree <- predict(model_tree, type = "class", newdata = subTesting)
+pred_svm <- predict(model_svm, newdata = subTesting)
+
+confusionMatrix(pred_rf, subTesting$classe)$overall[1]
+confusionMatrix(pred_boost, subTesting$classe)$overall[1]
+confusionMatrix(pred_tree, subTesting$classe)$overall[1]
+confusionMatrix(pred_svm, subTesting$classe)$overall[1]
+```
+
+The random forest, boost, tree and support vector machines all performed with >99% accuracy on the subTesting set. Either one of them can therefore be used going forward (on the Testing set). For the final exercise (submitted separately), the random forest model will be used.
